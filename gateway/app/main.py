@@ -1,12 +1,13 @@
 """FastAPI gateway: auth, rate limit, proxy to vLLM."""
 import asyncio
+import logging
 import time
 from collections import defaultdict
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import (
@@ -16,9 +17,20 @@ from .config import (
     RATE_LIMIT_RPM,
     MAX_CONCURRENT_REQUESTS,
 )
+from .metrics import TrackedSemaphore, get_metrics_bytes, get_metrics_content_type
+from .logging_config import RequestLoggingMiddleware
+
+# One JSON line per request to stdout
+_logger = logging.getLogger("llm_gateway")
+_logger.setLevel(logging.INFO)
+if not _logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _logger.addHandler(_h)
 
 app = FastAPI(title="LLM API Gateway", version="1.0.0")
 
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,8 +39,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Concurrency cap for vLLM
+# Concurrency cap for vLLM; tracked for Prometheus
 vllm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+tracked_semaphore = TrackedSemaphore(vllm_semaphore)
 
 # Rate limit: per API key, sliding window (timestamps in last 60s)
 _rate_ts: defaultdict[str, list] = defaultdict(list)
@@ -54,7 +67,7 @@ def _rate_limit(key: str) -> None:
 class AuthAndRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path in ("/health", "/metrics", "/docs", "/openapi.json", "/redoc"):
+        if path in ("/health", "/metrics", "/docs", "/openapi.json", "/redoc", "/"):
             return await call_next(request)
         key = _get_api_key(request)
         if not key:
@@ -76,6 +89,15 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/metrics")
+async def metrics():
+    """Prometheus scrape endpoint."""
+    return PlainTextResponse(
+        get_metrics_bytes(),
+        media_type=get_metrics_content_type(),
+    )
+
+
 @app.api_route("/v1/{path:path}", methods=["GET", "POST", "OPTIONS"])
 async def proxy_v1(request: Request, path: str):
     """Proxy /v1/* to vLLM (chat/completions, completions, models, etc.)."""
@@ -95,7 +117,7 @@ async def proxy_v1(request: Request, path: str):
             raise HTTPException(400, "Invalid JSON body")
 
     if request.method == "GET":
-        async with vllm_semaphore:
+        async with tracked_semaphore.acquire():
             async with httpx.AsyncClient(timeout=120.0) as client:
                 r = await client.get(url, headers=headers)
         if r.status_code >= 400:
@@ -104,7 +126,7 @@ async def proxy_v1(request: Request, path: str):
 
     if stream_requested:
         async def stream_chunks():
-            async with vllm_semaphore:
+            async with tracked_semaphore.acquire():
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     async with client.stream("POST", url, json=body, headers=headers) as r:
                         if r.status_code >= 400:
@@ -115,7 +137,7 @@ async def proxy_v1(request: Request, path: str):
                             yield chunk
         return StreamingResponse(stream_chunks(), media_type="text/event-stream")
 
-    async with vllm_semaphore:
+    async with tracked_semaphore.acquire():
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(url, json=body, headers=headers)
     if r.status_code >= 400:

@@ -15,7 +15,6 @@ services:
 
   vllm:
     image: vllm/vllm-openai:latest
-    runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_TOKEN=${HF_TOKEN:-}
